@@ -96,8 +96,20 @@ Data types
             * (is ignoring) changes in its subdirectories.
             * This flag will override this behaviour on platforms that support it.
             */
-            UV_FS_EVENT_RECURSIVE = 4
+            UV_FS_EVENT_RECURSIVE = 4,
+            /*
+            * By default, on Windows, reading a file can be reported as a change
+            * whenever NTFS writes a new last access time to disk (it does so
+            * only if the stored one is more than an hour old). This flag stops
+            * last access time updates from being reported. Writes, renames and
+            * creations are still reported.
+            * It is ignored on platforms other than Windows.
+            */
+            UV_FS_EVENT_IGNORE_LAST_ACCESS = 8
         };
+
+    .. versionchanged:: 1.53.0 added the ``UV_FS_EVENT_IGNORE_LAST_ACCESS``
+                        flag.
 
 
 Public members
@@ -120,8 +132,9 @@ API
     Start the handle with the given callback, which will watch the specified
     `path` for changes. `flags` can be an ORed mask of :c:enum:`uv_fs_event_flags`.
 
-    .. note:: Currently the only supported flag is ``UV_FS_EVENT_RECURSIVE`` and
-              only on OSX and Windows.
+    .. note:: Currently the only supported flags are ``UV_FS_EVENT_RECURSIVE``,
+              only on OSX and Windows, and ``UV_FS_EVENT_IGNORE_LAST_ACCESS``,
+              only on Windows.
     .. note:: On macOS, events collected by the OS immediately before calling
               ``uv_fs_event_start`` might be reported to the `uv_fs_event_cb`
               callback.
