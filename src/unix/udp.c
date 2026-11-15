@@ -1442,8 +1442,22 @@ static int uv__udp_sendmsgv(int fd,
 #endif
       while (r == -1 && errno == EINTR);
 
-      if (r < 1)
+      /* sendmmsg() reports only how many packets were sent, not why it
+       * stopped.  Anything unsent stays queued; the error, if any, is
+       * obtained by trying the first unsent packet again, so that only that
+       * packet is failed.
+       */
+      if (r < 0) {
+        r = UV__ERR(errno);
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS)
+          r = UV_EAGAIN;
         goto exit;
+      }
+
+      if (r == 0) {
+        r = UV_EAGAIN;
+        goto exit;
+      }
 
       nsent += r;
       i += r;
@@ -1463,12 +1477,6 @@ exit:
 
   if (nsent > 0)
     return nsent;
-
-  if (r < 0) {
-    r = UV__ERR(errno);
-    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ENOBUFS)
-      r = UV_EAGAIN;
-  }
 
   return r;
 }
