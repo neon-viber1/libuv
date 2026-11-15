@@ -834,6 +834,132 @@ TEST_IMPL(fs_event_watch_dir_short_path) {
 #endif
 
 
+#ifdef _WIN32
+static int ignore_atime_writing;
+static int ignore_atime_write_events;
+
+static void ignore_atime_event_cb(uv_fs_event_t* handle,
+                                  const char* filename,
+                                  int events,
+                                  int status) {
+  ASSERT_OK(status);
+  if (!ignore_atime_writing) {
+    /* A read must not be reported. */
+    fs_event_cb_called++;
+    return;
+  }
+  ignore_atime_write_events++;
+  uv_close((uv_handle_t*) handle, close_cb);
+  uv_close((uv_handle_t*) &timer, close_cb);
+}
+
+static void ignore_atime_write_cb(uv_timer_t* handle) {
+  ASSERT_OK(fs_event_cb_called);
+  ignore_atime_writing = 1;
+  touch_file("watch_atime/file");
+}
+
+static void ignore_atime_read_cb(uv_timer_t* handle) {
+  HANDLE h;
+  char buf[8];
+  DWORD n;
+  FILETIME before;
+  FILETIME after;
+
+  h = CreateFileA("watch_atime\\file",
+                  GENERIC_READ,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE,
+                  NULL,
+                  OPEN_EXISTING,
+                  FILE_ATTRIBUTE_NORMAL,
+                  NULL);
+  ASSERT(h != INVALID_HANDLE_VALUE);
+  ASSERT(GetFileTime(h, NULL, &before, NULL));
+  ASSERT(ReadFile(h, buf, sizeof(buf), &n, NULL));
+  CloseHandle(h);
+
+  /* Informational: when last access updates are disabled on the volume the
+   * read cannot raise a notification even without the flag, so the assertion
+   * below is only meaningful on volumes that update the access time. */
+  h = CreateFileA("watch_atime\\file",
+                  GENERIC_READ,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE,
+                  NULL,
+                  OPEN_EXISTING,
+                  FILE_ATTRIBUTE_NORMAL,
+                  NULL);
+  ASSERT(h != INVALID_HANDLE_VALUE);
+  ASSERT(GetFileTime(h, NULL, &after, NULL));
+  CloseHandle(h);
+  if (CompareFileTime(&before, &after) == 0)
+    fprintf(stderr, "last access time was not updated by the read\n");
+
+  /* Give a spurious notification time to arrive, then write the file. */
+  ASSERT_OK(uv_timer_start(&timer, ignore_atime_write_cb, 1000, 0));
+}
+
+TEST_IMPL(fs_event_ignore_last_access) {
+  uv_loop_t* loop;
+  HANDLE h;
+  FILETIME old_atime;
+  ULARGE_INTEGER t;
+  SYSTEMTIME st;
+  FILETIME now;
+
+  loop = uv_default_loop();
+  ignore_atime_writing = 0;
+  ignore_atime_write_events = 0;
+  fs_event_cb_called = 0;
+  close_cb_called = 0;
+  delete_file("watch_atime/file");
+  delete_dir("watch_atime");
+  create_dir("watch_atime");
+  create_file("watch_atime/file");
+
+  /* Set only the last access time back by two hours; NTFS updates it on
+   * disk (and so raises a notification) only if the stored one is stale. */
+  GetSystemTime(&st);
+  SystemTimeToFileTime(&st, &now);
+  t.LowPart = now.dwLowDateTime;
+  t.HighPart = now.dwHighDateTime;
+  t.QuadPart -= 2ULL * 60 * 60 * 10000000ULL;
+  old_atime.dwLowDateTime = t.LowPart;
+  old_atime.dwHighDateTime = t.HighPart;
+  h = CreateFileA("watch_atime\\file",
+                  FILE_WRITE_ATTRIBUTES,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE,
+                  NULL,
+                  OPEN_EXISTING,
+                  FILE_ATTRIBUTE_NORMAL,
+                  NULL);
+  ASSERT(h != INVALID_HANDLE_VALUE);
+  ASSERT(SetFileTime(h, NULL, &old_atime, NULL));
+  CloseHandle(h);
+
+  ASSERT_OK(uv_fs_event_init(loop, &fs_event));
+  ASSERT_OK(uv_fs_event_start(&fs_event,
+                              ignore_atime_event_cb,
+                              "watch_atime",
+                              UV_FS_EVENT_IGNORE_LAST_ACCESS));
+  ASSERT_OK(uv_timer_init(loop, &timer));
+  ASSERT_OK(uv_timer_start(&timer, ignore_atime_read_cb, 500, 0));
+
+  uv_run(loop, UV_RUN_DEFAULT);
+
+  ASSERT_OK(fs_event_cb_called);
+  ASSERT_GE(ignore_atime_write_events, 1);
+  ASSERT_EQ(2, close_cb_called);
+
+  /* Cleanup */
+  delete_file("watch_atime/file");
+  delete_dir("watch_atime");
+
+  MAKE_VALGRIND_HAPPY(loop);
+  return 0;
+}
+#endif
+
+
 TEST_IMPL(fs_event_watch_file) {
 #if defined(NO_FS_EVENTS)
   RETURN_SKIP(NO_FS_EVENTS);

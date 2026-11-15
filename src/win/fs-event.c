@@ -42,6 +42,25 @@ static DWORD uv__fs_event_get_buffer_size(uv_fs_event_t* handle) {
 }
 
 
+static DWORD uv__fs_event_get_filter(uv_fs_event_t* handle) {
+  DWORD filter;
+
+  filter = FILE_NOTIFY_CHANGE_FILE_NAME      |
+           FILE_NOTIFY_CHANGE_DIR_NAME       |
+           FILE_NOTIFY_CHANGE_ATTRIBUTES     |
+           FILE_NOTIFY_CHANGE_SIZE           |
+           FILE_NOTIFY_CHANGE_LAST_WRITE     |
+           FILE_NOTIFY_CHANGE_LAST_ACCESS    |
+           FILE_NOTIFY_CHANGE_CREATION       |
+           FILE_NOTIFY_CHANGE_SECURITY;
+
+  if (handle->flags & UV_HANDLE_FS_EVENT_IGNORE_LAST_ACCESS)
+    filter &= ~FILE_NOTIFY_CHANGE_LAST_ACCESS;
+
+  return filter;
+}
+
+
 static void uv__fs_event_queue_readdirchanges(uv_loop_t* loop,
     uv_fs_event_t* handle) {
   assert(handle->dir_handle != INVALID_HANDLE_VALUE);
@@ -53,14 +72,7 @@ static void uv__fs_event_queue_readdirchanges(uv_loop_t* loop,
                              handle->buffer,
                              uv__fs_event_get_buffer_size(handle),
                              (handle->flags & UV_HANDLE_FS_EVENT_WATCH_SUBTREE) ? TRUE : FALSE,
-                             FILE_NOTIFY_CHANGE_FILE_NAME      |
-                               FILE_NOTIFY_CHANGE_DIR_NAME     |
-                               FILE_NOTIFY_CHANGE_ATTRIBUTES   |
-                               FILE_NOTIFY_CHANGE_SIZE         |
-                               FILE_NOTIFY_CHANGE_LAST_WRITE   |
-                               FILE_NOTIFY_CHANGE_LAST_ACCESS  |
-                               FILE_NOTIFY_CHANGE_CREATION     |
-                               FILE_NOTIFY_CHANGE_SECURITY,
+                             uv__fs_event_get_filter(handle),
                              NULL,
                              &handle->req.u.io.overlapped,
                              NULL)) {
@@ -374,6 +386,11 @@ short_path_done:
   else
     handle->flags &= ~UV_HANDLE_FS_EVENT_WATCH_SUBTREE;
 
+  if (flags & UV_FS_EVENT_IGNORE_LAST_ACCESS)
+    handle->flags |= UV_HANDLE_FS_EVENT_IGNORE_LAST_ACCESS;
+  else
+    handle->flags &= ~UV_HANDLE_FS_EVENT_IGNORE_LAST_ACCESS;
+
   if (!handle->buffer) {
     handle->buffer = (char*)uv__malloc(uv__fs_event_get_buffer_size(handle));
   }
@@ -388,14 +405,7 @@ short_path_done:
                              handle->buffer,
                              uv__fs_event_get_buffer_size(handle),
                              (flags & UV_FS_EVENT_RECURSIVE) ? TRUE : FALSE,
-                             FILE_NOTIFY_CHANGE_FILE_NAME      |
-                               FILE_NOTIFY_CHANGE_DIR_NAME     |
-                               FILE_NOTIFY_CHANGE_ATTRIBUTES   |
-                               FILE_NOTIFY_CHANGE_SIZE         |
-                               FILE_NOTIFY_CHANGE_LAST_WRITE   |
-                               FILE_NOTIFY_CHANGE_LAST_ACCESS  |
-                               FILE_NOTIFY_CHANGE_CREATION     |
-                               FILE_NOTIFY_CHANGE_SECURITY,
+                             uv__fs_event_get_filter(handle),
                              NULL,
                              &handle->req.u.io.overlapped,
                              NULL)) {
