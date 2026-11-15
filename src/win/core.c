@@ -705,16 +705,14 @@ int uv_run(uv_loop_t *loop, uv_run_mode mode) {
   if (!r)
     uv_update_time(loop);
 
-  /* Maintain backwards compatibility by processing timers before entering the
-   * while loop for UV_RUN_DEFAULT. Otherwise timers only need to be executed
-   * once, which should be done after polling in order to maintain proper
-   * execution order of the conceptual event loop. */
-  if (mode == UV_RUN_DEFAULT && r != 0 && loop->stop_flag == 0) {
-    uv_update_time(loop);
-    uv__run_timers(loop);
-  }
-
   while (r != 0 && loop->stop_flag == 0) {
+    /* Run timers first so that check handles observe work they create. With
+     * UV_RUN_ONCE timers run after polling instead, see below. */
+    if (mode != UV_RUN_ONCE) {
+      uv_update_time(loop);
+      uv__run_timers(loop);
+    }
+
     can_sleep = loop->pending_reqs_tail == NULL && loop->idle_handles == NULL;
 
     uv__process_reqs(loop);
@@ -744,8 +742,13 @@ int uv_run(uv_loop_t *loop, uv_run_mode mode) {
     uv__check_invoke(loop);
     uv__process_endgames(loop);
 
-    uv_update_time(loop);
-    uv__run_timers(loop);
+    /* UV_RUN_ONCE returns after a single iteration and polls for at most
+     * the time until the next timer. Run timers here so that a timer that
+     * became due while polling is not missed, without running them twice. */
+    if (mode == UV_RUN_ONCE) {
+      uv_update_time(loop);
+      uv__run_timers(loop);
+    }
 
     r = uv__loop_alive(loop);
     if (mode == UV_RUN_ONCE || mode == UV_RUN_NOWAIT)

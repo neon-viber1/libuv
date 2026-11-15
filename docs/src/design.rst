@@ -99,12 +99,12 @@ stages of a loop iteration:
 
 #. The loop concept of 'now' is initially set.
 
-#. Due timers are run if the loop was run with ``UV_RUN_DEFAULT``. All active timers scheduled
-   for a time before the loop's concept of *now* get their callbacks called.
-
 #. If the loop is *alive*  an iteration is started, otherwise the loop will exit immediately. So,
    when is a loop considered to be *alive*? If a loop has active and ref'd handles, active
    requests or closing handles it's considered to be *alive*.
+
+#. The loop concept of 'now' is updated. Due timers are run (except with ``UV_RUN_ONCE``, see below). All active timers scheduled
+   for a time before the loop's concept of *now* get their callbacks called.
 
 #. Pending callbacks are called. All I/O callbacks are called right after polling for I/O, for the
    most part. There are cases, however, in which calling such a callback is deferred for the next
@@ -137,11 +137,8 @@ stages of a loop iteration:
 #. Close callbacks are called. If a handle was closed by calling :c:func:`uv_close` it will
    get the close callback called.
 
-#. The loop concept of 'now' is updated.
-
-#. Due timers are run. Note that 'now' is not updated again until the next loop iteration.
-   So if a timer became due while other timers were being processed, it won't be run until
-   the following event loop iteration.
+#. If the loop was run with ``UV_RUN_ONCE``, the loop concept of 'now' is updated and due timers
+   are run here instead, since the poll may have returned because a timer became due.
 
 #. Iteration ends. If the loop was run with ``UV_RUN_NOWAIT`` or ``UV_RUN_ONCE`` modes the
    iteration ends and :c:func:`uv_run` will return. If the loop was run with ``UV_RUN_DEFAULT``
