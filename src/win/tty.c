@@ -996,6 +996,9 @@ void uv_process_tty_read_line_req(uv_loop_t* loop, uv_tty_t* handle,
       handle->read_cb((uv_stream_t*) handle,
                       uv_translate_sys_error(GET_REQ_ERROR(req)),
                       &buf);
+    } else if (buf.base != NULL) {
+      /* Reading was stopped; return the unused buffer to the user. */
+      handle->read_cb((uv_stream_t*) handle, 0, &buf);
     }
   } else {
     if (!(handle->flags & UV_HANDLE_READ_CANCELLATION_PENDING) &&
@@ -1015,6 +1018,10 @@ void uv_process_tty_read_line_req(uv_loop_t* loop, uv_tty_t* handle,
       } else {
         handle->read_cb((uv_stream_t*) handle, bytes, &buf);
       }
+    } else if (buf.base != NULL) {
+      /* The read was cancelled or returned no data; return the unused
+       * buffer to the user. */
+      handle->read_cb((uv_stream_t*) handle, 0, &buf);
     }
     handle->flags &= ~UV_HANDLE_READ_CANCELLATION_PENDING;
   }
