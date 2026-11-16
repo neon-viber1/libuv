@@ -312,6 +312,60 @@ TEST_IMPL(tty_large_write) {
   return 0;
 }
 
+static int line_alloc_count;
+static int line_read_count;
+
+static void tty_line_alloc(uv_handle_t* handle,
+                           size_t size,
+                           uv_buf_t* buf) {
+  line_alloc_count++;
+  buf->base = malloc(size);
+  ASSERT_NOT_NULL(buf->base);
+  buf->len = size;
+}
+
+static void tty_line_read(uv_stream_t* stream,
+                          ssize_t nread,
+                          const uv_buf_t* buf) {
+  line_read_count++;
+  free(buf->base);
+}
+
+TEST_IMPL(tty_line_read_stop_buffer) {
+  int r;
+  int ttyin_fd;
+  uv_tty_t tty_in;
+  HANDLE handle;
+
+  handle = CreateFileA("conin$",
+                       GENERIC_READ | GENERIC_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE,
+                       NULL,
+                       OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL,
+                       NULL);
+  ASSERT_PTR_NE(handle, INVALID_HANDLE_VALUE);
+  ttyin_fd = _open_osfhandle((intptr_t) handle, 0);
+  ASSERT_GE(ttyin_fd, 0);
+  ASSERT_EQ(UV_TTY, uv_guess_handle(ttyin_fd));
+
+  r = uv_tty_init(uv_default_loop(), &tty_in, ttyin_fd, 1);  /* Readable. */
+  ASSERT_OK(r);
+  r = uv_read_start((uv_stream_t*) &tty_in, tty_line_alloc, tty_line_read);
+  ASSERT_OK(r);
+  r = uv_read_stop((uv_stream_t*) &tty_in);
+  ASSERT_OK(r);
+
+  uv_close((uv_handle_t*) &tty_in, NULL);
+  uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+
+  /* Every allocated buffer must have been handed back to the read callback. */
+  ASSERT_EQ(line_alloc_count, line_read_count);
+
+  MAKE_VALGRIND_HAPPY(uv_default_loop());
+  return 0;
+}
+
 TEST_IMPL(tty_raw_cancel) {
   int r;
   int ttyin_fd;
