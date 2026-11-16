@@ -345,6 +345,57 @@ TEST_IMPL(tty_raw_cancel) {
   return 0;
 }
 
+static int tty_cancel_allocs;
+static int tty_cancel_returns;
+
+static void tty_cancel_alloc(uv_handle_t* h, size_t size, uv_buf_t* buf) {
+  tty_cancel_allocs++;
+  *buf = uv_buf_init(malloc(size), size);
+  ASSERT_NOT_NULL(buf->base);
+}
+
+static void tty_cancel_read(uv_stream_t* s,
+                            ssize_t nread,
+                            const uv_buf_t* buf) {
+  if (buf->base != NULL) {
+    tty_cancel_returns++;
+    free(buf->base);
+  }
+}
+
+TEST_IMPL(tty_read_stop_returns_buffer) {
+  int ttyin_fd;
+  uv_tty_t tty_in;
+  HANDLE handle;
+
+  handle = CreateFileA("conin$",
+                       GENERIC_READ | GENERIC_WRITE,
+                       FILE_SHARE_READ | FILE_SHARE_WRITE,
+                       NULL,
+                       OPEN_EXISTING,
+                       FILE_ATTRIBUTE_NORMAL,
+                       NULL);
+  if (handle == INVALID_HANDLE_VALUE)
+    RETURN_SKIP("No console available.");
+  ttyin_fd = _open_osfhandle((intptr_t) handle, 0);
+  ASSERT_GE(ttyin_fd, 0);
+
+  ASSERT_OK(uv_tty_init(uv_default_loop(), &tty_in, ttyin_fd, 1));
+  ASSERT_OK(uv_tty_set_mode(&tty_in, UV_TTY_MODE_NORMAL));
+  ASSERT_OK(uv_read_start((uv_stream_t*) &tty_in,
+                          tty_cancel_alloc,
+                          tty_cancel_read));
+  ASSERT_OK(uv_read_stop((uv_stream_t*) &tty_in));
+  uv_close((uv_handle_t*) &tty_in, NULL);
+  ASSERT_OK(uv_run(uv_default_loop(), UV_RUN_DEFAULT));
+
+  /* Every buffer handed out by alloc_cb must have been returned. */
+  ASSERT_EQ(tty_cancel_allocs, tty_cancel_returns);
+
+  MAKE_VALGRIND_HAPPY(uv_default_loop());
+  return 0;
+}
+
 static int tty_ctrl_z_read_cb_calls;
 static HANDLE tty_ctrl_z_conin;
 
